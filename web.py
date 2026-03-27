@@ -10,8 +10,33 @@ def index():
     homepage += "<a href=/today>顯示日期時間</a><br>"
     homepage += "<a href=/welcome?nick=tcyang>傳送使用者暱稱</a><br>"
     homepage += "<a href=/account>網頁表單傳值</a><br>"
+    homepage += "<a href=/calc>次方與根號計算</a><br>"
     homepage += "<a href=/about>洪詩晴簡介網頁</a><br>"
     return homepage
+
+@app.route("/calc", methods=["GET", "POST"])
+def calculate():
+    result = None
+    if request.method == "POST":
+        try:
+            x = float(request.form.get("x"))
+            y = float(request.form.get("y"))
+            opt = request.form.get("opt")
+            
+            if opt == "pow":
+                result = x ** y
+            elif opt == "root":
+                if y == 0:
+                    result = "錯誤：不能開 0 次方根"
+                else:
+                    result = x ** (1/y)
+        except:
+            result = "輸入格式錯誤，請輸入數字"
+            
+    return render_template("calc.html", result=result)
+
+if __name__ == "__main__":
+    app.run(debug=True)
 
 @app.route("/mis")
 def course():

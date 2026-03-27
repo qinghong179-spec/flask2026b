@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>簡易次方與根號計算機</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        .container { max-width: 300px; border: 1px solid #ccc; padding: 20px; border-radius: 8px; }
+        input, select, button { width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; }
+        #result { font-weight: bold; color: blue; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3>簡易計算機</h3>
+    
+    <label>請輸入 x:</label>
+    <input type="number" id="numX" placeholder="例如: 9">
+
+    <label>選擇運算:</label>
+    <select id="opt">
+        <option value="pow">∧ (次方)</option>
+        <option value="root">√ (根號)</option>
+    </select>
+
+    <label>請輸入 y:</label>
+    <input type="number" id="numY" placeholder="例如: 2">
+
+    <button onclick="calculate()">計算結果</button>
+
+    <p>結果：<span id="result">---</span></p>
+</div>
+
+<script>
+    function calculate() {
+        // 取得輸入值並轉為數字
+        const x = parseFloat(document.getElementById('numX').value);
+        const y = parseFloat(document.getElementById('numY').value);
+        const opt = document.getElementById('opt').value;
+        let res;
+
+        if (isNaN(x) || isNaN(y)) {
+            res = "請輸入有效的數字";
+        } else if (opt === "pow") {
+            res = Math.pow(x, y); // 等同於 x ** y
+        } else if (opt === "root") {
+            if (y === 0) {
+                res = "數學不能開 0 次方根號";
+            } else {
+                res = Math.pow(x, 1/y); // 等同於 x ** (1/y)
+            }
+        }
+
+        // 將結果顯示在網頁上
+        document.getElementById('result').innerText = res;
+    }
+</script>
+
+</body>
+</html>
