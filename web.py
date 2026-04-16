@@ -18,77 +18,42 @@ else:
 
 firebase_admin.initialize_app(cred)
 
-
 app = Flask(__name__)
 
 @app.route("/")
 def index():
-    homepage = "<h1>洪詩晴的python網頁20260409</h1>"
-    homepage += "<a href=/mis>MIS</a><br>"
-    homepage += "<a href=/today>顯示日期時間</a><br>"
-    homepage += "<a href=/welcome?nick=tcyang>傳送使用者暱稱</a><br>"
-    homepage += "<a href=/account>網頁表單傳值</a><br>"
-    homepage += "<a href=/calc>次方與根號計算</a><br>"
-    homepage += "<a href=/about>洪詩晴簡介網頁</a><br>"
-    homepage += "<br><a href=/read>讀取Firestore資料</a><br>"
+	homepage = "<h1>洪詩晴Python網頁20260409</h1>"
+	homepage += "<a href=/mis>MIS</a><br>"
+	homepage += "<a href=/today>顯示日期時間</a><br>"
+	homepage += "<a href=/welcome?nick=wanxun>傳送使用者暱稱</a><br>"
+	homepage += "<a href=/account>網頁表單傳值</a><br>"
+	homepage += "<a href=/about>洪詩晴簡介網頁</a><br>"
+	homepage +="<a href=/calculator>次方與根號計算</a><br>"
+	homepage += "<br><a href=/read>讀取Firestore資料</a><br>"
+    homepage += "<br><a href=/read>讀取Firestore資料(根據姓名關鍵字:楊)</a><br>"
+	return homepage
 
-    return homepage
-
-@app.route("/read")
-def read():
-    Result = ""
-    db = firestore.client()
-    collection_ref = db.collection("資管二B2026")    
-    docs = collection_ref.get()    
-    for doc in docs:         
-        Result += str(doc.to_dict()) + "<br>"    
-    return Result
-
-
-@app.route("/calc", methods=["GET", "POST"])
-def calculate():
-    result = None
-    if request.method == "POST":
-        try:
-            x = float(request.form.get("x"))
-            y = float(request.form.get("y"))
-            opt = request.form.get("opt")
-            
-            if opt == "pow":
-                result = x ** y
-            elif opt == "root":
-                if y == 0:
-                    result = "錯誤：不能開 0 次方根"
-                else:
-                    result = x ** (1/y)
-        except:
-            result = "輸入格式錯誤，請輸入數字"
-            
-    return render_template("calc.html", result=result)
-
-if __name__ == "__main__":
-    app.run(debug=True)
 
 @app.route("/mis")
 def course():
-    return "<h1>資訊管理導論</h1>"
+	return "<h1>資訊管理導論</h1><a href=/>返回首頁</a>"
 
 @app.route("/today")
 def today():
-    now=datetime.now()
-    return render_template("today.html",datetime=str(now))
+	now = datetime.now()
+	return render_template("today.html",datetime = str(now))
 
-@app.route("/me")
+@app.route("/about")
 def me():
-    return render_template("aboutme6.html")
+	return render_template("about.html")
 
 @app.route("/welcome", methods=["GET"])
 def welcome():
-    user = request.values.get("u")
-    d= request.values.get("d")
+    user = request.values.get("nick")
+    d = request.values.get("d")
     c= request.values.get("c")
- 
-    return render_template("welcome.html", name=user,dep=d,course=c)
+    return render_template("welcome.html", name=user,dep = d,course = c)
+
 @app.route("/account", methods=["GET", "POST"])
 def account():
     if request.method == "POST":
@@ -100,6 +65,34 @@ def account():
         return render_template("account.html")
 
 
+@app.route("/calculator")
+def calculator():
+    return render_template("calculator.html")
+
+@app.route("/read")
+def read():
+    Result = ""
+    db = firestore.client()
+    collection_ref = db.collection("資管二B2026")    
+    docs = collection_ref.order_by("lab",direction=firestore.Query.DESCENDING).get()    
+    for doc in docs:         
+        Result += str(doc.to_dict()) + "<br>"    
+    return Result
+@app.route("/read2")
+  Result = ""
+  keyword="楊"
+    db = firestore.client()
+    collection_ref = db.collection("資管二B2026")    
+    docs = collection_ref.get()    
+    for doc in docs: 
+        teacher=doc.to_dict()
+        if keyword in teacher["name"]:        
+        Result += str(teacher) + "<br>"
+
+    if Result=="":
+           Result="抱歉,查無此姓名資料" 
+    return Result
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
+	app.run(debug=True)
