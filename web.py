@@ -28,8 +28,8 @@ def index():
     homepage = "<h1>洪詩晴Python網頁20260409</h1>"
     homepage += "<a href='/today'>顯示日期時間</a><br>"
     homepage += "<a href='/read2'>搜尋老師姓名關鍵字</a><br>"
-    homepage += "<a href='/spider1'>爬取子青老師本學期課程</a><br>"
-    homepage += "<a href='/m1'>爬取即將上映電影</a><br>"
+    homepage += "<a href='/spiderMove'>爬取即將上映電影至資料庫</a><br>"
+    homepage += "<a href='/movie_query'>🔍 查詢資料庫電影 (關鍵字)</a><br>"
     return homepage
 
 @app.route("/today")
@@ -37,66 +37,97 @@ def today():
     now = datetime.now()
     return f"<h3>現在時間：{now.strftime('%Y-%m-%d %H:%M:%S')}</h3><br><a href='/'>返回首頁</a>"
 
-# --- 3. 電影爬蟲功能 ---
-@app.route("/m1")
-def movie1():
-    keyword = request.args.get("keyword", "")
+# --- 3. 電影功能：爬取並存入資料庫 ---
+@app.route("/spiderMove")
+def spiderMove():
+    try:
+        db = firestore.client()
+        url = "http://www.atmovies.com.tw/movie/next/"
+        Data = requests.get(url)
+        Data.encoding = "utf-8"
+        sp = BeautifulSoup(Data.text, "html.parser")
+        
+        lastUpdate = sp.find(class_="smaller09").text.replace("更新時間:", "").strip()
+        result = sp.select(".filmListAllX li")
+        
+        total = 0
+        for item in result:
+            total += 1
+            movie_id = item.find("a").get("href").replace("/movie/","").replace("/","")
+            title = item.find(class_="filmtitle").text
+            picture = "https://www.atmovies.com.tw" + item.find("img").get("src")
+            hyperlink = "https://www.atmovies.com.tw" + item.find("a").get("href")
+            showDate = item.find(class_="runtime").text[5:15]
+
+            doc = {
+                "title": title,
+                "picture": picture,
+                "hyperlink": hyperlink,
+                "showDate": showDate,
+                "lastUpdate": lastUpdate
+            }
+            db.collection("電影2B").document(movie_id).set(doc)
+
+        return f"<h3>爬取完成！</h3>網站更新：{lastUpdate}<br>已將 {total} 部電影存入資料庫。<br><a href='/'>返回首頁</a>"
+    except Exception as e:
+        return f"發生錯誤：{str(e)}"
+
+# --- 4. 電影功能：資料庫關鍵字查詢 ---
+@app.route("/movie_query")
+def movie_query():
+    # 取得搜尋關鍵字
+    keyword = request.args.get("keyword", "").strip()
     
-    # 注意：這裡的 action 要改成 /m1 才能送回同一個頁面搜尋
-    R = f'''
+    html = f'''
         <div style="font-family: sans-serif; padding: 20px;">
-            <h2>電影查詢系統</h2>
-            <form action="/m1" method="get">
-                <input type="text" name="keyword" placeholder="請輸入片名關鍵字" value="{keyword}">
-                <button type="submit">搜尋</button>
+            <h2>🎬 電影資料庫查詢系統</h2>
+            <form action="/movie_query" method="get">
+                <input type="text" name="keyword" placeholder="請輸入片名關鍵字" value="{keyword}" style="padding:5px; width:250px;">
+                <button type="submit" style="padding:5px 15px;">搜尋</button>
             </form>
             <hr>
     '''
     
-    url = "https://www.atmovies.com.tw/movie/next/"
-    try:
-        Data = requests.get(url)
-        Data.encoding = "utf-8"
-        sp = BeautifulSoup(Data.text, "html.parser")
-        result = sp.select(".filmListAllX li")
-        
-        for item in result:
-            a_tag = item.find("a")
-            img_tag = item.find("img")
-
-            if a_tag and img_tag:
-                movie_name = img_tag.get("alt")
-                
-                # 關鍵字篩選
-                if keyword.lower() in movie_name.lower():
-                    movie_url = "https://www.atmovies.com.tw" + a_tag.get("href")
-                    img_src = "https://www.atmovies.com.tw" + img_tag.get("src")
-                    
-                    R += f'''
-                        <div style="margin-bottom: 40px;">
-                            <h3>{movie_name}</h3>
-                            <a href="{img_src}" target="_blank">
-                                <img src="{img_src}" width="200" title="點擊看大圖" style="border: 2px solid #ddd; border-radius: 5px;">
+    if keyword:
+        try:
+            db = firestore.client()
+            # 抓取資料庫所有資料進行篩選
+            docs = db.collection("電影2B").stream()
+            found_count = 0
+            
+            for doc in docs:
+                movie = doc.to_dict()
+                if keyword.lower() in movie.get("title", "").lower():
+                    found_count += 1
+                    html += f'''
+                        <div style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            <p><strong>編號：</strong>{doc.id}</p>
+                            <p><strong>片名：</strong>{movie.get('title')}</p>
+                            <p><strong>上映日期：</strong>{movie.get('showDate')}</p>
+                            <a href="{movie.get('hyperlink')}" target="_blank">
+                                <img src="{movie.get('picture')}" width="150" style="border-radius:5px; display:block; margin: 10px 0;">
+                                點此查看詳細介紹頁
                             </a>
-                            <p>
-                                <a href="{movie_url}" target="_blank" style="text-decoration: none; color: #E44D26; font-weight: bold;">
-                                    🔗 點此查看《{movie_name}》詳細介紹
-                                </a>
-                            </p>
-                            <hr>
                         </div>
                     '''
-    except Exception as e:
-        R += f"發生錯誤：{e}"
+            
+            if found_count == 0:
+                html += f"<p>查無符合「{keyword}」的電影資料。</p>"
+            else:
+                html += f"<p>共找到 {found_count} 筆搜尋結果。</p>"
+                
+        except Exception as e:
+            html += f"查詢出錯：{str(e)}"
+    else:
+        html += "<p>請在上方輸入框輸入關鍵字開始搜尋。</p>"
 
-    R += "<br><a href='/'>返回首頁</a></div>"
-    return R
+    html += "<br><a href='/'>返回首頁</a></div>"
+    return html
 
-# --- 4. 老師查詢功能 ---
-
+# --- 5. 老師查詢功能 (保留原功能) ---
 @app.route("/read2")
 def read2_input():
-    html = """
+    return """
     <h2>靜宜資管老師查詢系統</h2>
     <form action="/search_result" method="GET">
         <p>請輸入要搜尋的老師姓名關鍵字：
@@ -105,45 +136,23 @@ def read2_input():
     </form>
     <br><a href="/">返回首頁</a>
     """
-    return html
 
 @app.route("/search_result")
 def search_result():
     keyword = request.values.get("keyword", "").strip()
-    if not keyword:
-        return "您沒有輸入關鍵字！<br><a href='/read2'>重新查詢</a>"
-
+    if not keyword: return "未輸入關鍵字！<br><a href='/read2'>返回</a>"
     try:
         db = firestore.client()
-        collection_ref = db.collection("資管二B2026")
-        docs = collection_ref.get()
-
+        docs = db.collection("資管二B2026").get()
         found_count = 0
-        table_html = f"<h3>關於「{keyword}」的搜尋結果：</h3>"
-        table_html += """
-        <style>
-            table { width: 100%; border-collapse: collapse; }
-            th, td { border: 1px solid #ddd; padding: 10px; }
-            th { background-color: #2196f3; color: white; }
-        </style>
-        <table><tr><th>老師姓名</th><th>詳細資料</th></tr>
-        """
-
+        res = f"<h3>「{keyword}」搜尋結果：</h3>"
         for doc in docs:
-            teacher = doc.to_dict()
-            if keyword in teacher.get("name", ""):
+            t = doc.to_dict()
+            if keyword in t.get("name", ""):
                 found_count += 1
-                table_html += f"<tr><td><strong>{teacher.get('name')}</strong></td><td>{str(teacher)}</td></tr>"
-        
-        table_html += "</table>"
+                res += f"<p><strong>{t.get('name')}</strong> - {str(t)}</p>"
+        return res + f"<p>共 {found_count} 筆</p><a href='/'>首頁</a>"
+    except Exception as e: return f"錯誤：{e}"
 
-        if found_count == 0:
-            return f"查無姓名包含「{keyword}」的老師資料。<br><a href='/read2'>重新查詢</a>"
-
-        return table_html + f"<br><p>共找到 {found_count} 筆資料</p><a href='/'>返回首頁</a>"
-    except Exception as e:
-        return f"資料庫讀取出錯：{str(e)}"
-
-# --- 5. 啟動伺服器 (務必放在最後面) ---
 if __name__ == "__main__":
     app.run(debug=True)
