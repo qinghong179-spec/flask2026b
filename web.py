@@ -1,23 +1,29 @@
 import requests
-from bs4 import BeautifulSoup
-from flask import Flask, render_template, request
-from datetime import datetime
-import os
 import json
+import os
+import urllib3
+from flask import Flask, request
+from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
 
+# --- 0. 解決 SSL 憑證驗證失敗問題 (重要：解決 road 功能報錯) ---
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # --- 1. Firebase 初始化 ---
 if not firebase_admin._apps:
-    if os.path.exists('serviceAccountKey.json'):
-        cred = credentials.Certificate('serviceAccountKey.json')
-        firebase_admin.initialize_app(cred)
-    else:
-        firebase_config = os.getenv('FIREBASE_CONFIG')
-        if firebase_config:
-            cred_dict = json.loads(firebase_config)
-            cred = credentials.Certificate(cred_dict)
+    try:
+        if os.path.exists('serviceAccountKey.json'):
+            cred = credentials.Certificate('serviceAccountKey.json')
             firebase_admin.initialize_app(cred)
+        else:
+            firebase_config = os.getenv('FIREBASE_CONFIG')
+            if firebase_config:
+                cred_dict = json.loads(firebase_config)
+                cred = credentials.Certificate(cred_dict)
+                firebase_admin.initialize_app(cred)
+    except Exception as e:
+        print(f"Firebase 初始化失敗：{e}")
 
 app = Flask(__name__)
 
@@ -25,114 +31,90 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    homepage = "<h1>洪詩晴Python網頁20260409</h1>"
-    homepage += "<a href='/today'>顯示日期時間</a><br>"
-    homepage += "<a href='/read2'>搜尋老師姓名關鍵字</a><br>"
-    homepage += "<a href='/spiderMove'>爬取即將上映電影至資料庫</a><br>"
-    homepage += "<a href='/movie_query'>🔍 查詢資料庫電影 (關鍵字)</a><br>"
+    homepage = "<h1>洪詩晴 Python 網頁 20260507</h1>"
+    homepage += "<p><b>功能測試清單：</b></p>"
+    homepage += "<a href='/today'>📅 顯示日期時間</a><br>"
+    homepage += "<a href='/weather_input'>☁️ 縣市天氣預報查詢</a><br>"
+    homepage += "<a href='/road'>⚠️ 台中市十大肇事路口</a><br>"
+    homepage += "<a href='/read2'>👤 搜尋老師姓名關鍵字</a><br>"
     return homepage
 
+# (1) road: 列出台中市十大肇事路口
+@app.route("/road")
+def road():
+    R = "<h2>📍 台中市十大肇事路口</h2><hr>"
+    try:
+        url = "https://datacenter.taichung.gov.tw/swagger/OpenData/a1b899c0-511f-4e3d-b22b-814982a97e41"
+        # 加上 verify=False 解決連線錯誤
+        response = requests.get(url, verify=False, timeout=10)
+        response.encoding = 'utf-8'
+        json_data = response.json()
+        
+        for item in json_data[:10]:
+            R += f"🚩 <b>{item.get('路口名稱', '未知')}</b><br>"
+            R += f"主要肇因：{item.get('主要肇因', '無資料')}<br><br>"
+        
+        R += "<br><a href='/'>返回首頁</a>"
+        return R
+    except Exception as e:
+        return f"讀取路口資料發生錯誤：{str(e)} <br><a href='/'>返回首頁</a>"
+
+# (2) weather: 顯示目前天氣及降雨機率
+@app.route("/weather_input")
+def weather_input():
+    return """
+    <h2>🌦️ 全台縣市天氣查詢</h2>
+    <form action="/weather_result" method="GET">
+        請輸入欲查詢的縣市 (如：臺中市)：
+        <input type="text" name="city" value="臺中市">
+        <button type="submit">查詢天氣</button>
+    </form>
+    <br><a href="/">返回首頁</a>
+    """
+@app.route("/weather_result")
+def weather_result():
+    # 修正引號與參數取得
+    city = request.args.get("city", "臺中市").replace("台", "臺")
+    
+    # 1. 修正網址：確保 {city} 有正確放在 locationName= 後面
+    token = "rdec-key-123-45678-011121314" 
+    url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001?Authorization={token}&format=JSON&locationName={city}"
+    
+    try:
+        # 2. 修正連線：加入 verify=False 解決 SSL 錯誤
+        res = requests.get(url, verify=False, timeout=10)
+        data = res.json()
+        
+        if "records" in data and data["records"]["location"]:
+            loc_info = data["records"]["location"][0]
+            # 取得天氣現象 (例如：多雲時晴)
+            weather_state = loc_info["weatherElement"][0]["time"][0]["parameter"]["parameterName"]
+            # 取得降雨機率
+            rain_chance = loc_info["weatherElement"][1]["time"][0]["parameter"]["parameterName"]
+            
+            result = f"<h3>📍 {city} 最新天氣預報</h3>"
+            result += f"<p>目前天氣狀況：<b>{weather_state}</b></p>"
+            result += f"<p>降雨機率：<b>{rain_chance}%</b></p>"
+        else:
+            result = f"<h3>找不到「{city}」的天氣資料</h3>"
+            
+        return result + "<br><a href='/weather_input'>重新查詢</a> | <a href='/'>返回首頁</a>"
+    except Exception as e:
+        # 這裡會捕捉並顯示錯誤訊息
+        return f"氣象資料獲取失敗：{e} <br><a href='/'>返回首頁</a>"
+# 顯示日期時間
 @app.route("/today")
 def today():
     now = datetime.now()
     return f"<h3>現在時間：{now.strftime('%Y-%m-%d %H:%M:%S')}</h3><br><a href='/'>返回首頁</a>"
 
-# --- 3. 電影功能：爬取並存入資料庫 ---
-@app.route("/spiderMove")
-def spiderMove():
-    try:
-        db = firestore.client()
-        url = "http://www.atmovies.com.tw/movie/next/"
-        Data = requests.get(url)
-        Data.encoding = "utf-8"
-        sp = BeautifulSoup(Data.text, "html.parser")
-        
-        lastUpdate = sp.find(class_="smaller09").text.replace("更新時間:", "").strip()
-        result = sp.select(".filmListAllX li")
-        
-        total = 0
-        for item in result:
-            total += 1
-            movie_id = item.find("a").get("href").replace("/movie/","").replace("/","")
-            title = item.find(class_="filmtitle").text
-            picture = "https://www.atmovies.com.tw" + item.find("img").get("src")
-            hyperlink = "https://www.atmovies.com.tw" + item.find("a").get("href")
-            showDate = item.find(class_="runtime").text[5:15]
-
-            doc = {
-                "title": title,
-                "picture": picture,
-                "hyperlink": hyperlink,
-                "showDate": showDate,
-                "lastUpdate": lastUpdate
-            }
-            db.collection("電影2B").document(movie_id).set(doc)
-
-        return f"<h3>爬取完成！</h3>網站更新：{lastUpdate}<br>已將 {total} 部電影存入資料庫。<br><a href='/'>返回首頁</a>"
-    except Exception as e:
-        return f"發生錯誤：{str(e)}"
-
-# --- 4. 電影功能：資料庫關鍵字查詢 ---
-@app.route("/movie_query")
-def movie_query():
-    # 取得搜尋關鍵字
-    keyword = request.args.get("keyword", "").strip()
-    
-    html = f'''
-        <div style="font-family: sans-serif; padding: 20px;">
-            <h2>🎬 電影資料庫查詢系統</h2>
-            <form action="/movie_query" method="get">
-                <input type="text" name="keyword" placeholder="請輸入片名關鍵字" value="{keyword}" style="padding:5px; width:250px;">
-                <button type="submit" style="padding:5px 15px;">搜尋</button>
-            </form>
-            <hr>
-    '''
-    
-    if keyword:
-        try:
-            db = firestore.client()
-            # 抓取資料庫所有資料進行篩選
-            docs = db.collection("電影2B").stream()
-            found_count = 0
-            
-            for doc in docs:
-                movie = doc.to_dict()
-                if keyword.lower() in movie.get("title", "").lower():
-                    found_count += 1
-                    html += f'''
-                        <div style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-                            <p><strong>編號：</strong>{doc.id}</p>
-                            <p><strong>片名：</strong>{movie.get('title')}</p>
-                            <p><strong>上映日期：</strong>{movie.get('showDate')}</p>
-                            <a href="{movie.get('hyperlink')}" target="_blank">
-                                <img src="{movie.get('picture')}" width="150" style="border-radius:5px; display:block; margin: 10px 0;">
-                                點此查看詳細介紹頁
-                            </a>
-                        </div>
-                    '''
-            
-            if found_count == 0:
-                html += f"<p>查無符合「{keyword}」的電影資料。</p>"
-            else:
-                html += f"<p>共找到 {found_count} 筆搜尋結果。</p>"
-                
-        except Exception as e:
-            html += f"查詢出錯：{str(e)}"
-    else:
-        html += "<p>請在上方輸入框輸入關鍵字開始搜尋。</p>"
-
-    html += "<br><a href='/'>返回首頁</a></div>"
-    return html
-
-# --- 5. 老師查詢功能 (保留原功能) ---
+# 老師資料查詢
 @app.route("/read2")
 def read2_input():
     return """
-    <h2>靜宜資管老師查詢系統</h2>
+    <h2>👤 老師查詢系統</h2>
     <form action="/search_result" method="GET">
-        <p>請輸入要搜尋的老師姓名關鍵字：
-        <input type="text" name="keyword" placeholder="例如：楊">
-        <button type="submit">開始查詢</button></p>
+        姓名關鍵字：<input type="text" name="keyword"> <button type="submit">搜尋</button>
     </form>
     <br><a href="/">返回首頁</a>
     """
@@ -140,19 +122,20 @@ def read2_input():
 @app.route("/search_result")
 def search_result():
     keyword = request.values.get("keyword", "").strip()
-    if not keyword: return "未輸入關鍵字！<br><a href='/read2'>返回</a>"
     try:
         db = firestore.client()
         docs = db.collection("資管二B2026").get()
-        found_count = 0
         res = f"<h3>「{keyword}」搜尋結果：</h3>"
+        found = False
         for doc in docs:
             t = doc.to_dict()
             if keyword in t.get("name", ""):
-                found_count += 1
                 res += f"<p><strong>{t.get('name')}</strong> - {str(t)}</p>"
-        return res + f"<p>共 {found_count} 筆</p><a href='/'>首頁</a>"
-    except Exception as e: return f"錯誤：{e}"
+                found = True
+        if not found: res += "查無資料。"
+        return res + "<br><a href='/'>返回首頁</a>"
+    except Exception as e:
+        return f"錯誤：{e} <br><a href='/'>返回首頁</a>"
 
 if __name__ == "__main__":
     app.run(debug=True)
