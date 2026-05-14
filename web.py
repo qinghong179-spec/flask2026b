@@ -2,11 +2,10 @@ import requests
 import json
 import os
 import urllib3
-from flask import Flask, request,make_response, jsonify
+from flask import Flask, request, make_response, jsonify
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
-# 補上缺少的 BeautifulSoup 引用
 from bs4 import BeautifulSoup
 
 # --- 0. 解決 SSL 憑證驗證失敗問題 ---
@@ -44,15 +43,31 @@ def index():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # build a request object
     req = request.get_json(force=True)
-    # fetch queryResult from json
-    action =  req["queryResult"]["action"]
-    #msg =  ["queryResult"]["queryText"]
-    #info = "我是洪詩晴設計的機器人動作：" + action + "； 查詢內容：" + msg
+    action = req["queryResult"]["action"]
+    
     if (action == "rateChoice"):
-        rate =  req["queryResult"]["parameters"]["rate"]
-        info = "我是洪詩晴設計的機器人,您選擇的電影分級是：" + rate
+        # 取得 Dialogflow 傳來的參數 (例如：保護級、普遍級)
+        rate = req["queryResult"]["parameters"]["rate"]
+        
+        db = firestore.client()
+        # 從 Firestore 查詢符合該分級的電影
+        # 注意：集合名稱必須與你 /rate 路由中存入的名稱一致
+        collection_ref = db.collection("本週新片含分級B")
+        docs = collection_ref.where("rate", "==", rate).get()
+        
+        if not docs:
+            info = f"目前資料庫中沒有找到分級為「{rate}」的本週新片喔！"
+        else:
+            info = f"我是洪詩晴設計的機器人，為您推薦本週的{rate}電影：\n"
+            for doc in docs:
+                movie_data = doc.to_dict()
+                title = movie_data.get("title")
+                link = movie_data.get("hyperlink")
+                info += f"🎬 {title}\n連結：{link}\n\n"
+
+    else:
+        info = "抱歉，我不清楚您要求的動作是什麼。"
 
     return make_response(jsonify({"fulfillmentText": info}))
 
@@ -65,7 +80,6 @@ def rate():
         Data.encoding = "utf-8"
         sp = BeautifulSoup(Data.text, "html.parser")
         
-        # 取得更新日期
         update_tag = sp.find(class_="smaller09")
         lastUpdate = update_tag.text[5:] if update_tag else "未知"
 
@@ -77,24 +91,21 @@ def rate():
                 title = x.find("a").text
                 introduce = x.find("p").text
 
-                # 處理 ID 與 連結
                 link_tag = x.find("a").get("href")
                 movie_id = link_tag.replace("/", "").replace("movie", "")
                 hyperlink = "http://www.atmovies.com.tw/movie/" + movie_id
                 picture = f"https://www.atmovies.com.tw/photo101/{movie_id}/pm_{movie_id}.jpg"
 
-                # 處理分級
                 r = x.find(class_="runtime").find("img")
                 rate_text = "未分級"
                 if r:
                     rr = r.get("src").replace("/images/cer_", "").replace(".gif", "")
+                    # 對應到中文分級名稱，方便 Dialogflow 查詢
                     rate_dict = {"G": "普遍級", "P": "保護級", "F2": "輔12級", "F5": "輔15級", "R": "限制級"}
                     rate_text = rate_dict.get(rr, "限制級")
 
-                # 處理片長與上映日期 (加入防錯，避免 int() 轉換失敗)
                 t_info = x.find(class_="runtime").text
                 
-                # 抓取片長
                 try:
                     t1 = t_info.find("片長")
                     t2 = t_info.find("分")
@@ -102,10 +113,8 @@ def rate():
                 except:
                     showLength = 0
 
-                # 抓取日期
                 try:
                     d1 = t_info.find("上映日期")
-                    # 避免切片範圍錯誤，改用較彈性的找法
                     showDate = t_info[d1+5:d1+15].strip() 
                 except:
                     showDate = "未知"
@@ -121,7 +130,6 @@ def rate():
                     "lastUpdate": lastUpdate
                 }
 
-                # 寫入 Firebase
                 doc_ref = db.collection("本週新片含分級B").document(movie_id)
                 doc_ref.set(doc)
             except Exception as inner_e:
@@ -133,7 +141,6 @@ def rate():
     except Exception as e:
         return f"❌ 發生錯誤：{e} <br><a href='/'>返回首頁</a>"
 
-# (1) road: 列出台中市十大肇事路口
 @app.route("/road")
 def road():
     R = "<h2>📍 台中市十大肇事路口</h2><hr>"
@@ -152,7 +159,6 @@ def road():
     except Exception as e:
         return f"讀取路口資料發生錯誤：{str(e)} <br><a href='/'>返回首頁</a>"
 
-# (2) weather: 查詢天氣
 @app.route("/weather_input")
 def weather_input():
     return """
@@ -190,13 +196,11 @@ def weather_result():
     except Exception as e:
         return f"氣象資料獲取失敗：{e} <br><a href='/'>返回首頁</a>"
 
-# 顯示日期時間
 @app.route("/today")
 def today():
     now = datetime.now()
     return f"<h3>現在時間：{now.strftime('%Y-%m-%d %H:%M:%S')}</h3><br><a href='/'>返回首頁</a>"
 
-# 老師資料查詢
 @app.route("/read2")
 def read2_input():
     return """
