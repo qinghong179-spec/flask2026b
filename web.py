@@ -6,8 +6,10 @@ from flask import Flask, request
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
+# 補上缺少的 BeautifulSoup 引用
+from bs4 import BeautifulSoup
 
-# --- 0. 解決 SSL 憑證驗證失敗問題 (重要：解決 road 功能報錯) ---
+# --- 0. 解決 SSL 憑證驗證失敗問題 ---
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- 1. Firebase 初始化 ---
@@ -37,7 +39,85 @@ def index():
     homepage += "<a href='/weather_input'>☁️ 縣市天氣預報查詢</a><br>"
     homepage += "<a href='/road'>⚠️ 台中市十大肇事路口(洪詩晴)</a><br>"
     homepage += "<a href='/read2'>👤 搜尋老師姓名關鍵字</a><br>"
+    homepage += "<a href='/rate'>🎬 本週新片進DB</a><br>"
     return homepage
+
+@app.route("/rate")
+def rate():
+    # 本週新片爬蟲
+    url = "https://www.atmovies.com.tw/movie/new/"
+    try:
+        Data = requests.get(url)
+        Data.encoding = "utf-8"
+        sp = BeautifulSoup(Data.text, "html.parser")
+        
+        # 取得更新日期
+        update_tag = sp.find(class_="smaller09")
+        lastUpdate = update_tag.text[5:] if update_tag else "未知"
+
+        result = sp.select(".filmList")
+        db = firestore.client()
+
+        for x in result:
+            try:
+                title = x.find("a").text
+                introduce = x.find("p").text
+
+                # 處理 ID 與 連結
+                link_tag = x.find("a").get("href")
+                movie_id = link_tag.replace("/", "").replace("movie", "")
+                hyperlink = "http://www.atmovies.com.tw/movie/" + movie_id
+                picture = f"https://www.atmovies.com.tw/photo101/{movie_id}/pm_{movie_id}.jpg"
+
+                # 處理分級
+                r = x.find(class_="runtime").find("img")
+                rate_text = "未分級"
+                if r:
+                    rr = r.get("src").replace("/images/cer_", "").replace(".gif", "")
+                    rate_dict = {"G": "普遍級", "P": "保護級", "F2": "輔12級", "F5": "輔15級", "R": "限制級"}
+                    rate_text = rate_dict.get(rr, "限制級")
+
+                # 處理片長與上映日期 (加入防錯，避免 int() 轉換失敗)
+                t_info = x.find(class_="runtime").text
+                
+                # 抓取片長
+                try:
+                    t1 = t_info.find("片長")
+                    t2 = t_info.find("分")
+                    showLength = int(t_info[t1+3:t2].strip())
+                except:
+                    showLength = 0
+
+                # 抓取日期
+                try:
+                    d1 = t_info.find("上映日期")
+                    # 避免切片範圍錯誤，改用較彈性的找法
+                    showDate = t_info[d1+5:d1+15].strip() 
+                except:
+                    showDate = "未知"
+
+                doc = {
+                    "title": title,
+                    "introduce": introduce,
+                    "picture": picture,
+                    "hyperlink": hyperlink,
+                    "showDate": showDate,
+                    "showLength": showLength,
+                    "rate": rate_text,
+                    "lastUpdate": lastUpdate
+                }
+
+                # 寫入 Firebase
+                doc_ref = db.collection("本週新片含分級B").document(movie_id)
+                doc_ref.set(doc)
+            except Exception as inner_e:
+                print(f"單部電影處理失敗: {inner_e}")
+                continue
+
+        return f"✅ 本週新片已爬蟲及存檔完畢！最近更新日期：{lastUpdate} <br><a href='/'>返回首頁</a>"
+
+    except Exception as e:
+        return f"❌ 發生錯誤：{e} <br><a href='/'>返回首頁</a>"
 
 # (1) road: 列出台中市十大肇事路口
 @app.route("/road")
@@ -45,7 +125,6 @@ def road():
     R = "<h2>📍 台中市十大肇事路口</h2><hr>"
     try:
         url = "https://datacenter.taichung.gov.tw/swagger/OpenData/a1b899c0-511f-4e3d-b22b-814982a97e41"
-        # 加上 verify=False 解決連線錯誤
         response = requests.get(url, verify=False, timeout=10)
         response.encoding = 'utf-8'
         json_data = response.json()
@@ -59,7 +138,7 @@ def road():
     except Exception as e:
         return f"讀取路口資料發生錯誤：{str(e)} <br><a href='/'>返回首頁</a>"
 
-# (2) weather: 顯示目前天氣及降雨機率
+# (2) weather: 查詢天氣
 @app.route("/weather_input")
 def weather_input():
     return """
@@ -71,25 +150,20 @@ def weather_input():
     </form>
     <br><a href="/">返回首頁</a>
     """
+
 @app.route("/weather_result")
 def weather_result():
-    # 修正引號與參數取得
     city = request.args.get("city", "臺中市").replace("台", "臺")
-    
-    # 1. 修正網址：確保 {city} 有正確放在 locationName= 後面
     token = "rdec-key-123-45678-011121314" 
     url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001?Authorization={token}&format=JSON&locationName={city}"
     
     try:
-        # 2. 修正連線：加入 verify=False 解決 SSL 錯誤
         res = requests.get(url, verify=False, timeout=10)
         data = res.json()
         
         if "records" in data and data["records"]["location"]:
             loc_info = data["records"]["location"][0]
-            # 取得天氣現象 (例如：多雲時晴)
             weather_state = loc_info["weatherElement"][0]["time"][0]["parameter"]["parameterName"]
-            # 取得降雨機率
             rain_chance = loc_info["weatherElement"][1]["time"][0]["parameter"]["parameterName"]
             
             result = f"<h3>📍 {city} 最新天氣預報</h3>"
@@ -100,8 +174,8 @@ def weather_result():
             
         return result + "<br><a href='/weather_input'>重新查詢</a> | <a href='/'>返回首頁</a>"
     except Exception as e:
-        # 這裡會捕捉並顯示錯誤訊息
         return f"氣象資料獲取失敗：{e} <br><a href='/'>返回首頁</a>"
+
 # 顯示日期時間
 @app.route("/today")
 def today():
