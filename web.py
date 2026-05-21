@@ -2,7 +2,7 @@ import requests
 import json
 import os
 import urllib3
-from flask import Flask, request, make_response, jsonify
+from flask import Flask, request, make_response, jsonify,render_template
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -39,7 +39,13 @@ def index():
     homepage += "<a href='/road'>⚠️ 台中市十大肇事路口(洪詩晴)</a><br>"
     homepage += "<a href='/read2'>👤 搜尋老師姓名關鍵字</a><br>"
     homepage += "<a href='/rate'>🎬 本週新片進DB</a><br>"
+    homepage += "<a href='/demo'>聊天機器人</a><br>"
     return homepage
+
+
+@app.route("/demo")
+def demo():
+   return render_template("demo.html")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
