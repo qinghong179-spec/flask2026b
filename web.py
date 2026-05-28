@@ -7,6 +7,8 @@ from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
 from bs4 import BeautifulSoup
+from google import genai
+
 
 # --- 0. 解決 SSL 憑證驗證失敗問題 ---
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -27,6 +29,8 @@ if not firebase_admin._apps:
         print(f"Firebase 初始化失敗：{e}")
 
 app = Flask(__name__)
+client = genai.Client()
+
 
 # --- 2. 路由設定 ---
 
@@ -40,8 +44,40 @@ def index():
     homepage += "<a href='/read2'>👤 搜尋老師姓名關鍵字</a><br>"
     homepage += "<a href='/rate'>🎬 本週新片進DB</a><br>"
     homepage += "<a href='/demo'>聊天機器人</a><br>"
+    homepage += "<a href='/AI'>AI進行測試</a><br>"
+    homepage += "<a href='/ask'>ask</a><br>"
     return homepage
 
+@app.route('/ask', methods=['GET', 'POST']) 
+def ask():
+    if request.method == "POST":
+        user_prompt = request.form.get('prompt', '')
+        if not user_prompt:
+            return "請輸入內容", 400
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=user_prompt,
+            )
+            return response.text
+        except Exception as e:
+            return f"發生錯誤: {str(e)}", 500
+
+    else:    
+        # 當使用者直接打開網頁 (GET) 時，顯示輸入框畫面
+        return render_template("ask.html")
+
+
+@app.route("/AI")
+def AI():
+    # 每次使用者拜訪該路徑時，直接使用全域的 client 呼叫模型
+    response = client.models.generate_content(
+        model='gemini-3.5-flash',
+        contents='我想查詢靜宜大學資管系的評價？',
+    )
+    
+    # 回傳生成的文字
+    return response.text
 
 @app.route("/demo")
 def demo():
