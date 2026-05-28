@@ -8,6 +8,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from bs4 import BeautifulSoup
 from google import genai
+from google.genai import types
 
 
 # --- 0. 解決 SSL 憑證驗證失敗問題 ---
@@ -43,7 +44,7 @@ def index():
     homepage += "<a href='/road'>⚠️ 台中市十大肇事路口(洪詩晴)</a><br>"
     homepage += "<a href='/read2'>👤 搜尋老師姓名關鍵字</a><br>"
     homepage += "<a href='/rate'>🎬 本週新片進DB</a><br>"
-    homepage += "<a href='/demo'>聊天機器人</a><br>"
+    homepage += "<a href='/webhook7'>聊天機器人</a><br>"
     homepage += "<a href='/AI'>AI進行測試</a><br>"
     homepage += "<a href='/ask'>ask</a><br>"
     return homepage
@@ -79,11 +80,11 @@ def AI():
     # 回傳生成的文字
     return response.text
 
-@app.route("/demo")
+@app.route("/webhook7")
 def demo():
    return render_template("demo.html")
 
-@app.route("/webhook", methods=["POST"])
+@app.route("/webhook7", methods=["POST"])
 def webhook():
     req = request.get_json(force=True)
     action = req["queryResult"]["action"]
@@ -111,7 +112,34 @@ def webhook():
     else:
         info = "抱歉，我不清楚您要求的動作是什麼。"
 
+    elif (action == "input.unknown"):
+        #info =  req["queryResult"]["queryText"]
+            instruction_text = (
+            "你是一個熱心且知識豐富的專業智慧助理。"
+            "對於使用者的提問，請回覆重點的關鍵字，不要重述問題。"         
+        )
+
+
+        ai_config = types.GenerateContentConfig(
+            max_output_tokens=500, 
+            system_instruction=instruction_text
+        )
+        response = client.models.generate_content(
+            model='gemini-3.5-flash', 
+            contents=req["queryResult"]["queryText"],
+            config=ai_config,
+        )
+
+        if response.text:
+            info = response.text
+        else:
+            info = "抱歉，我現在無法生成回應，請稍後再試。"
+
+
+
     return make_response(jsonify({"fulfillmentText": info}))
+
+
 
 @app.route("/rate")
 def rate():
