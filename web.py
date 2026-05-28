@@ -2,7 +2,7 @@ import requests
 import json
 import os
 import urllib3
-from flask import Flask, request, make_response, jsonify,render_template
+from flask import Flask, request, make_response, jsonify, render_template
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -63,7 +63,6 @@ def ask():
             return response.text
         except Exception as e:
             return f"發生錯誤: {str(e)}", 500
-
     else:    
         # 當使用者直接打開網頁 (GET) 時，顯示輸入框畫面
         return render_template("ask.html")
@@ -76,26 +75,23 @@ def AI():
         model='gemini-3.1-flash-lite',
         contents='我想查詢靜宜大學資管系的評價？',
     )
-    
     # 回傳生成的文字
     return response.text
 
-@app.route("/webhook7")
+@app.route("/webhook7", methods=["GET"])
 def demo():
-   return render_template("demo.html")
+    return render_template("demo.html")
 
 @app.route("/webhook7", methods=["POST"])
 def webhook():
     req = request.get_json(force=True)
     action = req["queryResult"]["action"]
     
+    # 1. 處理電影分級查詢
     if (action == "rateChoice"):
-        # 取得 Dialogflow 傳來的參數 (例如：保護級、普遍級)
         rate = req["queryResult"]["parameters"]["rate"]
         
         db = firestore.client()
-        # 從 Firestore 查詢符合該分級的電影
-        # 注意：集合名稱必須與你 /rate 路由中存入的名稱一致
         collection_ref = db.collection("本週新片含分級B")
         docs = collection_ref.where("rate", "==", rate).get()
         
@@ -109,36 +105,37 @@ def webhook():
                 link = movie_data.get("hyperlink")
                 info += f"🎬 {title}\n連結：{link}\n\n"
 
-    else:
-        info = "抱歉，我不清楚您要求的動作是什麼。"
-
+    # 2. 處理 Fallback (呼叫 Gemini 生成回應)
     elif (action == "input.unknown"):
-        #info =  req["queryResult"]["queryText"]
-            instruction_text = (
+        instruction_text = (
             "你是一個熱心且知識豐富的專業智慧助理。"
             "對於使用者的提問，請回覆重點的關鍵字，不要重述問題。"         
         )
-
 
         ai_config = types.GenerateContentConfig(
             max_output_tokens=500, 
             system_instruction=instruction_text
         )
-        response = client.models.generate_content(
-            model='gemini-3.1-flash-lite', 
-            contents=req["queryResult"]["queryText"],
-            config=ai_config,
-        )
+        
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.1-flash-lite', 
+                contents=req["queryResult"]["queryText"],
+                config=ai_config,
+            )
 
-        if response.text:
-            info = response.text
-        else:
-            info = "抱歉，我現在無法生成回應，請稍後再試。"
+            if response.text:
+                info = response.text
+            else:
+                info = "抱歉，我現在無法生成回應，請稍後再試。"
+        except Exception as e:
+            info = f"AI 生成失敗，錯誤訊息：{str(e)}"
 
-
+    # 3. 其他未定義的動作
+    else:
+        info = "抱歉，我不清楚您要求的動作是什麼。"
 
     return make_response(jsonify({"fulfillmentText": info}))
-
 
 
 @app.route("/rate")
@@ -170,7 +167,6 @@ def rate():
                 rate_text = "未分級"
                 if r:
                     rr = r.get("src").replace("/images/cer_", "").replace(".gif", "")
-                    # 對應到中文分級名稱，方便 Dialogflow 查詢
                     rate_dict = {"G": "普遍級", "P": "保護級", "F2": "輔12級", "F5": "輔15級", "R": "限制級"}
                     rate_text = rate_dict.get(rr, "限制級")
 
