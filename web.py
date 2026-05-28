@@ -64,18 +64,15 @@ def ask():
         except Exception as e:
             return f"發生錯誤: {str(e)}", 500
     else:    
-        # 當使用者直接打開網頁 (GET) 時，顯示輸入框畫面
         return render_template("ask.html")
 
 
 @app.route("/AI")
 def AI():
-    # 每次使用者拜訪該路徑時，直接使用全域的 client 呼叫模型
     response = client.models.generate_content(
         model='gemini-3.1-flash-lite',
         contents='我想查詢靜宜大學資管系的評價？',
     )
-    # 回傳生成的文字
     return response.text
 
 @app.route("/webhook7", methods=["GET"])
@@ -85,7 +82,9 @@ def demo():
 @app.route("/webhook7", methods=["POST"])
 def webhook():
     req = request.get_json(force=True)
-    action = req["queryResult"]["action"]
+    
+    # 按照投影片第 11 行的安全寫法擷取 action
+    action = req.get("queryResult").get("action")
     
     # 1. 處理電影分級查詢
     if (action == "rateChoice"):
@@ -105,7 +104,7 @@ def webhook():
                 link = movie_data.get("hyperlink")
                 info += f"🎬 {title}\n連結：{link}\n\n"
 
-    # 2. 處理 Fallback (呼叫 Gemini 生成回應)
+    # 2. 處理 Fallback (對應投影片紅框，並整合 Gemini 智慧助理)
     elif (action == "input.unknown"):
         instruction_text = (
             "你是一個熱心且知識豐富的專業智慧助理。"
@@ -128,172 +127,4 @@ def webhook():
                 info = response.text
             else:
                 info = "抱歉，我現在無法生成回應，請稍後再試。"
-        except Exception as e:
-            info = f"AI 生成失敗，錯誤訊息：{str(e)}"
-
-    # 3. 其他未定義的動作
-    else:
-        info = "抱歉，我不清楚您要求的動作是什麼。"
-
-    return make_response(jsonify({"fulfillmentText": info}))
-
-
-@app.route("/rate")
-def rate():
-    # 本週新片爬蟲
-    url = "https://www.atmovies.com.tw/movie/new/"
-    try:
-        Data = requests.get(url)
-        Data.encoding = "utf-8"
-        sp = BeautifulSoup(Data.text, "html.parser")
-        
-        update_tag = sp.find(class_="smaller09")
-        lastUpdate = update_tag.text[5:] if update_tag else "未知"
-
-        result = sp.select(".filmList")
-        db = firestore.client()
-
-        for x in result:
-            try:
-                title = x.find("a").text
-                introduce = x.find("p").text
-
-                link_tag = x.find("a").get("href")
-                movie_id = link_tag.replace("/", "").replace("movie", "")
-                hyperlink = "http://www.atmovies.com.tw/movie/" + movie_id
-                picture = f"https://www.atmovies.com.tw/photo101/{movie_id}/pm_{movie_id}.jpg"
-
-                r = x.find(class_="runtime").find("img")
-                rate_text = "未分級"
-                if r:
-                    rr = r.get("src").replace("/images/cer_", "").replace(".gif", "")
-                    rate_dict = {"G": "普遍級", "P": "保護級", "F2": "輔12級", "F5": "輔15級", "R": "限制級"}
-                    rate_text = rate_dict.get(rr, "限制級")
-
-                t_info = x.find(class_="runtime").text
-                
-                try:
-                    t1 = t_info.find("片長")
-                    t2 = t_info.find("分")
-                    showLength = int(t_info[t1+3:t2].strip())
-                except:
-                    showLength = 0
-
-                try:
-                    d1 = t_info.find("上映日期")
-                    showDate = t_info[d1+5:d1+15].strip() 
-                except:
-                    showDate = "未知"
-
-                doc = {
-                    "title": title,
-                    "introduce": introduce,
-                    "picture": picture,
-                    "hyperlink": hyperlink,
-                    "showDate": showDate,
-                    "showLength": showLength,
-                    "rate": rate_text,
-                    "lastUpdate": lastUpdate
-                }
-
-                doc_ref = db.collection("本週新片含分級B").document(movie_id)
-                doc_ref.set(doc)
-            except Exception as inner_e:
-                print(f"單部電影處理失敗: {inner_e}")
-                continue
-
-        return f"✅ 本週新片已爬蟲及存檔完畢！最近更新日期：{lastUpdate} <br><a href='/'>返回首頁</a>"
-
-    except Exception as e:
-        return f"❌ 發生錯誤：{e} <br><a href='/'>返回首頁</a>"
-
-@app.route("/road")
-def road():
-    R = "<h2>📍 台中市十大肇事路口</h2><hr>"
-    try:
-        url = "https://datacenter.taichung.gov.tw/swagger/OpenData/a1b899c0-511f-4e3d-b22b-814982a97e41"
-        response = requests.get(url, verify=False, timeout=10)
-        response.encoding = 'utf-8'
-        json_data = response.json()
-        
-        for item in json_data[:10]:
-            R += f"🚩 <b>{item.get('路口名稱', '未知')}</b><br>"
-            R += f"主要肇因：{item.get('主要肇因', '無資料')}<br><br>"
-        
-        R += "<br><a href='/'>返回首頁</a>"
-        return R
-    except Exception as e:
-        return f"讀取路口資料發生錯誤：{str(e)} <br><a href='/'>返回首頁</a>"
-
-@app.route("/weather_input")
-def weather_input():
-    return """
-    <h2>🌦️ 全台縣市天氣查詢</h2>
-    <form action="/weather_result" method="GET">
-        請輸入欲查詢的縣市 (如：臺中市)：
-        <input type="text" name="city" value="臺中市">
-        <button type="submit">查詢天氣</button>
-    </form>
-    <br><a href="/">返回首頁</a>
-    """
-
-@app.route("/weather_result")
-def weather_result():
-    city = request.args.get("city", "臺中市").replace("台", "臺")
-    token = "rdec-key-123-45678-011121314" 
-    url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001?Authorization={token}&format=JSON&locationName={city}"
-    
-    try:
-        res = requests.get(url, verify=False, timeout=10)
-        data = res.json()
-        
-        if "records" in data and data["records"]["location"]:
-            loc_info = data["records"]["location"][0]
-            weather_state = loc_info["weatherElement"][0]["time"][0]["parameter"]["parameterName"]
-            rain_chance = loc_info["weatherElement"][1]["time"][0]["parameter"]["parameterName"]
-            
-            result = f"<h3>📍 {city} 最新天氣預報</h3>"
-            result += f"<p>目前天氣狀況：<b>{weather_state}</b></p>"
-            result += f"<p>降雨機率：<b>{rain_chance}%</b></p>"
-        else:
-            result = f"<h3>找不到「{city}」的天氣資料</h3>"
-            
-        return result + "<br><a href='/weather_input'>重新查詢</a> | <a href='/'>返回首頁</a>"
-    except Exception as e:
-        return f"氣象資料獲取失敗：{e} <br><a href='/'>返回首頁</a>"
-
-@app.route("/today")
-def today():
-    now = datetime.now()
-    return f"<h3>現在時間：{now.strftime('%Y-%m-%d %H:%M:%S')}</h3><br><a href='/'>返回首頁</a>"
-
-@app.route("/read2")
-def read2_input():
-    return """
-    <h2>👤 老師查詢系統</h2>
-    <form action="/search_result" method="GET">
-        姓名關鍵字：<input type="text" name="keyword"> <button type="submit">搜尋</button>
-    </form>
-    <br><a href="/">返回首頁</a>
-    """
-
-@app.route("/search_result")
-def search_result():
-    keyword = request.values.get("keyword", "").strip()
-    try:
-        db = firestore.client()
-        docs = db.collection("資管二B2026").get()
-        res = f"<h3>「{keyword}」搜尋結果：</h3>"
-        found = False
-        for doc in docs:
-            t = doc.to_dict()
-            if keyword in t.get("name", ""):
-                res += f"<p><strong>{t.get('name')}</strong> - {str(t)}</p>"
-                found = True
-        if not found: res += "查無資料。"
-        return res + "<br><a href='/'>返回首頁</a>"
-    except Exception as e:
-        return f"錯誤：{e} <br><a href='/'>返回首頁</a>"
-
-if __name__ == "__main__":
-    app.run(debug=True)
+        except Exception
